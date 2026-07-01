@@ -1,0 +1,30 @@
+services:
+  clipforge:
+    build:
+      context: .
+    ports:
+      - "8000:8000"
+    environment:
+      CLIPFORGE_ENVIRONMENT: production
+      CLIPFORGE_MODEL_BACKEND: ${CLIPFORGE_MODEL_BACKEND:-mock}
+      CLIPFORGE_API_KEYS: ${CLIPFORGE_API_KEYS:-[]}
+      CLIPFORGE_CORS_ORIGINS: '["http://localhost:8000"]'
+      CLIPFORGE_VECTOR_STORE_PATH: /data/clipforge.db
+    volumes:
+      - clipforge-data:/data
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+
+volumes:
+  clipforge-data:

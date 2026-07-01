@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="CLIPForge multimodal intelligence console" />
+    <title>CLIPForge · Multimodal Intelligence</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/assets/app.css" />
+  </head>
+  <body>
+    <div class="noise"></div>
+    <aside class="sidebar">
+      <a class="brand" href="/">
+        <span class="brand-mark"><i></i><i></i></span>
+        <span>CLIP<span>Forge</span></span>
+      </a>
+      <nav>
+        <button class="nav-item active" data-view="playground">
+          <span class="nav-icon">⌘</span> Playground
+        </button>
+        <button class="nav-item" data-view="search">
+          <span class="nav-icon">⌕</span> Semantic Search
+        </button>
+        <a class="nav-item" href="/docs" target="_blank">
+          <span class="nav-icon">↗</span> API Reference
+        </a>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="status-card">
+          <div class="status-row"><span class="pulse"></span><span id="serviceStatus">Connecting</span></div>
+          <small id="modelCompact">Loading runtime…</small>
+        </div>
+        <button class="settings-button" id="settingsButton">API settings <span>→</span></button>
+      </div>
+    </aside>
+
+    <main>
+      <header class="topbar">
+        <div>
+          <span class="eyebrow">MULTIMODAL WORKSPACE</span>
+          <h1 id="pageTitle">Compare meaning, not pixels.</h1>
+        </div>
+        <div class="header-actions">
+          <span class="version" id="tenantBadge">TENANT · default</span>
+          <span class="version">v0.2</span>
+          <a class="github-link" href="https://github.com/" target="_blank">GitHub ↗</a>
+        </div>
+      </header>
+
+      <section id="playgroundView" class="view active">
+        <div class="hero-grid">
+          <article class="panel image-panel">
+            <div class="panel-heading">
+              <div><span class="step">01</span><h2>Image</h2></div>
+              <button class="subtle-button" id="clearImage">Clear</button>
+            </div>
+            <label class="dropzone" id="dropzone" for="imageInput">
+              <input type="file" id="imageInput" accept="image/*" />
+              <img id="preview" alt="Selected preview" />
+              <div class="drop-content" id="dropContent">
+                <div class="upload-glyph">＋</div>
+                <strong>Drop an image here</strong>
+                <span>or click to browse · PNG, JPG, WebP</span>
+              </div>
+            </label>
+            <div class="file-meta" id="fileMeta">
+              <span>No image selected</span><span>MAX 10 MB</span>
+            </div>
+          </article>
+
+          <article class="panel text-panel">
+            <div class="panel-heading">
+              <div><span class="step">02</span><h2>Candidate labels</h2></div>
+              <button class="subtle-button" id="loadExample">Example</button>
+            </div>
+            <p class="helper">One phrase per line. The model will score each phrase against your image.</p>
+            <textarea id="labels" spellcheck="false" placeholder="a product photo&#10;a landscape&#10;an illustration"></textarea>
+            <div class="text-footer">
+              <span id="labelCount">0 labels</span>
+              <button class="primary-button" id="compareButton">
+                <span>Run comparison</span><b>⌘ ↵</b>
+              </button>
+            </div>
+          </article>
+        </div>
+
+        <article class="results-panel">
+          <div class="results-heading">
+            <div>
+              <span class="eyebrow">MODEL OUTPUT</span>
+              <h2>Similarity ranking</h2>
+            </div>
+            <div class="latency" id="latency">Awaiting input</div>
+          </div>
+          <div class="empty-state" id="emptyResults">
+            <div class="orb"><span></span></div>
+            <p>Your semantic matches will appear here.</p>
+          </div>
+          <div class="ranking" id="ranking"></div>
+        </article>
+      </section>
+
+      <section id="searchView" class="view">
+        <div class="search-layout">
+          <article class="panel index-panel">
+            <div class="panel-heading">
+              <div><span class="step">01</span><h2>Build an index</h2></div>
+            </div>
+            <p class="helper">Add content as <code>id | text</code>. Data is persisted in the active tenant collection.</p>
+            <textarea id="indexItems" spellcheck="false" placeholder="sku-101 | lightweight running shoe&#10;sku-102 | waterproof hiking jacket"></textarea>
+            <button class="primary-button full" id="indexButton">Embed & index records</button>
+          </article>
+          <article class="panel query-panel">
+            <div class="panel-heading">
+              <div><span class="step">02</span><h2>Search by intent</h2></div>
+            </div>
+            <p class="helper">Natural language in, closest concepts out.</p>
+            <div class="query-row">
+              <input id="searchQuery" type="text" placeholder="something for a rainy mountain trip" />
+              <button class="primary-button" id="searchButton">Search</button>
+            </div>
+            <div class="search-results" id="searchResults">
+              <div class="search-empty">Index content, then search it by meaning.</div>
+            </div>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <dialog id="settingsDialog">
+      <form method="dialog">
+        <div class="dialog-heading">
+          <div><span class="eyebrow">CONNECTION</span><h2>API settings</h2></div>
+          <button value="cancel" class="close-button">×</button>
+        </div>
+        <label>API base URL<input id="apiBase" value="/api/v1" /></label>
+        <label>API key<input id="apiKey" type="password" placeholder="Optional in development" /></label>
+        <label>Tenant ID<input id="tenantId" placeholder="default" /></label>
+        <label>Active collection<input id="collectionName" placeholder="main" /></label>
+        <p>Stored only in this browser. Production deployments should issue scoped keys through your secret manager.</p>
+        <button value="default" class="primary-button full" id="saveSettings">Save settings</button>
+      </form>
+    </dialog>
+
+    <div class="toast" id="toast"></div>
+    <script src="/assets/app.js" defer></script>
+  </body>
+</html>
