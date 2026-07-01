@@ -1,4 +1,4 @@
-# CLIPForge 0.2
+# CLIPForge 0.3
 
 面向生产环境的多模态模型与向量检索平台。CLIPForge 将图片和文本映射到统一语义空间，支持零样本分类、文搜图、图搜图、跨模态检索和批量向量化。
 
@@ -12,6 +12,8 @@
 - **并发隔离**：同步 PyTorch 推理移出 ASGI 事件循环，并通过推理闸门保护 GPU
 - **Embedding cache**：文本与图片按 SHA-256 缓存，LRU 淘汰并暴露命中统计
 - **Prompt ensemble**：零样本分类自动聚合多套提示词，不再只比较一个裸标签
+- **不确定性感知检索**：使用 Top-K margin 与归一化熵识别模糊意图
+- **人机协同重排**：根据用户正负反馈更新查询向量并重新排序
 - **完整跨模态检索**：文本和图片都可作为查询，也都可作为被检索对象
 - **持久化向量仓库**：SQLite WAL、集合管理、元数据过滤和重启恢复
 - **企业隔离**：通过 `X-Tenant-ID` 实现租户级集合与任务隔离
@@ -95,6 +97,7 @@ $env:CLIPFORGE_MODEL_PRECISION="bf16"
 | `POST /api/v1/collections/{name}/items/text` | 文本入库 |
 | `POST /api/v1/collections/{name}/items/image` | 图片入库 |
 | `POST /api/v1/collections/{name}/search` | 文搜文、文搜图、图搜图、图搜文 |
+| `POST /api/v1/collections/{name}/search/interactive` | 不确定性检测、澄清与反馈重排 |
 | `POST /api/v1/jobs/index/text` | 提交批量入库任务 |
 | `GET /api/v1/jobs/{id}` | 查询任务状态 |
 | `GET /api/v1/model` | 当前模型、设备、精度和能力 |
@@ -134,6 +137,35 @@ curl http://127.0.0.1:8000/api/v1/collections/catalog/search \
     "metadata_filter": {"region": "apac"}
   }'
 ```
+
+### 不确定性感知的人机协同检索
+
+交互检索首先根据 Top-K 分数分布计算 probability margin 和 normalized entropy。查询意图模糊时，API 返回两个代表性候选项；用户选择更相关的结果后，系统通过 Rocchio-style relevance feedback 更新查询向量：
+
+```text
+Query → SigLIP2 → Top-K → Uncertainty Estimation
+                              ├─ confident → results
+                              └─ ambiguous → clarification
+                                                  ↓
+                                         feedback re-ranking
+```
+
+```bash
+curl http://127.0.0.1:8000/api/v1/collections/catalog/search/interactive \
+  -H "Content-Type: application/json" \
+  -H "X-Tenant-ID: acme" \
+  -d '{
+    "query_type": "text",
+    "query": "适合正式场合的鞋",
+    "limit": 5,
+    "feedback": {
+      "positive_ids": ["formal-shoe-01"],
+      "negative_ids": ["running-shoe-02"]
+    }
+  }'
+```
+
+响应包含 `uncertainty`、`clarification`、`feedback_applied` 和 `query_drift`，可用于构建“模型不确定时主动询问”的人机协同界面。
 
 ## 配置
 

@@ -147,15 +147,20 @@ async function indexItems() {
   }
 }
 
-async function search() {
+async function search(feedback = null) {
   const query = $("#searchQuery").value.trim();
   if (!query) return toast("Enter a search query.", true);
   const button = $("#searchButton");
   button.disabled = true;
   try {
-    const result = await api(`/collections/${encodeURIComponent(state.collection)}/search`, {
+    const result = await api(`/collections/${encodeURIComponent(state.collection)}/search/interactive`, {
       method: "POST",
-      body: JSON.stringify({ query_type: "text", query, limit: 10 }),
+      body: JSON.stringify({
+        query_type: "text",
+        query,
+        limit: 10,
+        ...(feedback ? { feedback } : {}),
+      }),
     });
     $("#searchResults").innerHTML = result.hits.length
       ? result.hits.map((hit, index) => `<div class="hit">
@@ -164,10 +169,47 @@ async function search() {
           <span class="hit-score">${hit.score.toFixed(4)}</span>
         </div>`).join("")
       : '<div class="search-empty">No matching records found.</div>';
+    renderUncertainty(result);
   } catch (error) {
     toast(error.message, true);
   } finally {
     button.disabled = false;
+  }
+}
+
+function renderUncertainty(result) {
+  const panel = $("#uncertaintyPanel");
+  const uncertainty = result.uncertainty;
+  const confidence = Math.round(uncertainty.confidence * 100);
+  const status = uncertainty.needs_clarification ? "Intent is ambiguous" : "Model is confident";
+  panel.className = "uncertainty-panel show";
+  panel.innerHTML = `<div class="confidence-card${uncertainty.needs_clarification ? " uncertain" : ""}">
+    <span class="confidence-label"><i class="confidence-dot"></i>${status}</span>
+    <span class="confidence-metrics">CONF ${confidence}% · MARGIN ${uncertainty.margin.toFixed(3)} · ENTROPY ${uncertainty.normalized_entropy.toFixed(3)}</span>
+  </div>`;
+
+  if (result.clarification) {
+    panel.innerHTML += `<div class="clarification-card">
+      <strong>Help the model understand your intent</strong>
+      <p>${escapeHtml(result.clarification.question)}</p>
+      <div class="clarification-options">
+        ${result.clarification.options.map((option, index) => `<button class="clarification-option" data-feedback-id="${escapeHtml(option.id)}" data-option-index="${index}">
+          <small>OPTION ${String.fromCharCode(65 + index)} · ${option.modality.toUpperCase()}</small>
+          <span>${escapeHtml(option.label)}</span>
+        </button>`).join("")}
+      </div>
+    </div>`;
+    panel.querySelectorAll(".clarification-option").forEach((button) => {
+      button.addEventListener("click", () => {
+        const positive = button.dataset.feedbackId;
+        const negative = result.clarification.options
+          .map((option) => option.id)
+          .filter((id) => id !== positive);
+        search({ positive_ids: [positive], negative_ids: negative });
+      });
+    });
+  } else if (result.feedback_applied) {
+    panel.innerHTML += `<div class="feedback-note">FEEDBACK APPLIED · QUERY DRIFT ${result.query_drift.toFixed(3)}</div>`;
   }
 }
 

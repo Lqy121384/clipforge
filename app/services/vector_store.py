@@ -260,6 +260,37 @@ class SQLiteVectorStore:
         best = heapq.nlargest(limit, scored, key=lambda item: (item[0], item[1]))
         return [(record, score, item_modality) for score, _, record, item_modality in best]
 
+    def get_records(
+        self,
+        tenant_id: str,
+        collection: str,
+        item_ids: list[str],
+    ) -> list[tuple[IndexRecord, str]]:
+        if not item_ids:
+            return []
+        placeholders = ",".join("?" for _ in item_ids)
+        rows = self._db.execute(
+            f"""
+            SELECT item_id, vector, metadata_json, modality
+            FROM vectors
+            WHERE tenant_id = ? AND collection_name = ?
+              AND item_id IN ({placeholders})
+            """,
+            (tenant_id, collection, *item_ids),
+        ).fetchall()
+        by_id = {
+            row["item_id"]: (
+                IndexRecord(
+                    item_id=row["item_id"],
+                    vector=self._unpack(row["vector"]),
+                    metadata=json.loads(row["metadata_json"]),
+                ),
+                row["modality"],
+            )
+            for row in rows
+        }
+        return [by_id[item_id] for item_id in item_ids if item_id in by_id]
+
     def count(self, tenant_id: str | None = None) -> int:
         if tenant_id is None:
             row = self._db.execute("SELECT COUNT(*) AS count FROM vectors").fetchone()

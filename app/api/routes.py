@@ -10,6 +10,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from app.api.dependencies import get_runtime, get_tenant_id
 from app.api.schemas import (
     BatchIndexJobRequest,
+    ClarificationOption,
+    ClarificationPrompt,
     ClassificationLabel,
     ClassificationRequest,
     ClassificationResponse,
@@ -24,6 +26,8 @@ from app.api.schemas import (
     IndexImageRequest,
     IndexMutationResponse,
     IndexUpsertRequest,
+    InteractiveSearchRequest,
+    InteractiveSearchResponse,
     JobListResponse,
     JobResponse,
     ModelCatalogResponse,
@@ -36,10 +40,12 @@ from app.api.schemas import (
     SimilarityRequest,
     SimilarityResponse,
     TextEmbeddingRequest,
+    UncertaintyResponse,
 )
 from app.core.config import Settings, get_settings
 from app.core.security import require_api_key
 from app.services.index import IndexRecord
+from app.services.interactive import estimate_uncertainty, refine_query
 from app.services.runtime import Runtime
 
 router = APIRouter()
@@ -559,6 +565,115 @@ async def multimodal_search(
         ],
         took_ms=(time.perf_counter() - started) * 1000,
         collection=collection,
+    )
+
+
+@protected.post(
+    "/collections/{collection}/search/interactive",
+    response_model=InteractiveSearchResponse,
+    tags=["Human-in-the-loop Search"],
+)
+async def interactive_search(
+    collection: str,
+    body: InteractiveSearchRequest,
+    runtime: Annotated[Runtime, Depends(get_runtime)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    tenant_id: Annotated[str, Depends(get_tenant_id)],
+) -> InteractiveSearchResponse:
+    _validate_collection(collection)
+    started = time.perf_counter()
+    if body.query_type == "text":
+        original_vector = (await runtime.inference.text([body.query]))[0]
+        query_label = body.query
+    else:
+        payload = _decode_image(body.query, settings.max_image_bytes)
+        original_vector = (await runtime.inference.image([payload]))[0]
+        query_label = "base64:image"
+
+    feedback_ids = body.feedback.positive_ids + body.feedback.negative_ids
+    feedback_records = runtime.store.get_records(
+        tenant_id,
+        collection,
+        feedback_ids,
+    )
+    found_ids = {record.item_id for record, _ in feedback_records}
+    missing_ids = set(feedback_ids) - found_ids
+    if missing_ids:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "feedback_items_not_found",
+                "message": f"Feedback items not found: {sorted(missing_ids)}",
+            },
+        )
+    vectors_by_id = {record.item_id: record.vector for record, _ in feedback_records}
+    positive_vectors = [vectors_by_id[item_id] for item_id in body.feedback.positive_ids]
+    negative_vectors = [vectors_by_id[item_id] for item_id in body.feedback.negative_ids]
+    query_vector, query_drift = refine_query(
+        original_vector,
+        positive_vectors,
+        negative_vectors,
+        body.feedback.alpha,
+        body.feedback.beta,
+        body.feedback.gamma,
+    )
+    results = runtime.store.search(
+        tenant_id,
+        collection,
+        query_vector,
+        body.limit,
+        body.metadata_filter,
+        body.target_modality,
+    )
+    hits = [
+        SearchHit(
+            id=record.item_id,
+            score=score,
+            modality=modality,
+            metadata=record.metadata,
+        )
+        for record, score, modality in results
+    ]
+    uncertainty = estimate_uncertainty(
+        [hit.score for hit in hits],
+        body.uncertainty_temperature,
+        body.margin_threshold,
+        body.entropy_threshold,
+    )
+    clarification = None
+    if uncertainty.needs_clarification and len(hits) >= 2:
+        options = []
+        for hit in hits[:2]:
+            label = (
+                hit.metadata.get("_text")
+                or hit.metadata.get("title")
+                or hit.metadata.get("name")
+                or hit.id
+            )
+            options.append(
+                ClarificationOption(
+                    id=hit.id,
+                    label=str(label),
+                    modality=hit.modality,
+                    score=hit.score,
+                )
+            )
+        clarification = ClarificationPrompt(
+            question="Which result is closer to your intent?",
+            options=options,
+        )
+    return InteractiveSearchResponse(
+        query=query_label,
+        hits=hits,
+        took_ms=(time.perf_counter() - started) * 1000,
+        collection=collection,
+        uncertainty=UncertaintyResponse.model_validate(
+            uncertainty,
+            from_attributes=True,
+        ),
+        clarification=clarification,
+        feedback_applied=bool(positive_vectors or negative_vectors),
+        query_drift=query_drift,
     )
 
 

@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class TextEmbeddingRequest(BaseModel):
@@ -139,6 +139,55 @@ class MultimodalSearchRequest(BaseModel):
     limit: int = Field(default=10, ge=1, le=100)
     target_modality: Literal["text", "image"] | None = None
     metadata_filter: dict[str, Any] | None = None
+
+
+class RelevanceFeedback(BaseModel):
+    positive_ids: list[str] = Field(default_factory=list, max_length=20)
+    negative_ids: list[str] = Field(default_factory=list, max_length=20)
+    alpha: float = Field(default=1.0, ge=0.0, le=2.0)
+    beta: float = Field(default=0.75, ge=0.0, le=2.0)
+    gamma: float = Field(default=0.25, ge=0.0, le=2.0)
+
+    @model_validator(mode="after")
+    def validate_feedback(self) -> "RelevanceFeedback":
+        overlap = set(self.positive_ids) & set(self.negative_ids)
+        if overlap:
+            raise ValueError("An item cannot be both positive and negative feedback")
+        return self
+
+
+class InteractiveSearchRequest(MultimodalSearchRequest):
+    uncertainty_temperature: float = Field(default=0.07, gt=0.001, le=1.0)
+    margin_threshold: float = Field(default=0.12, gt=0.0, lt=1.0)
+    entropy_threshold: float = Field(default=0.78, gt=0.0, lt=1.0)
+    feedback: RelevanceFeedback = Field(default_factory=RelevanceFeedback)
+
+
+class UncertaintyResponse(BaseModel):
+    margin: float
+    normalized_entropy: float
+    confidence: float
+    needs_clarification: bool
+    reason: str
+
+
+class ClarificationOption(BaseModel):
+    id: str
+    label: str
+    modality: Literal["text", "image"]
+    score: float
+
+
+class ClarificationPrompt(BaseModel):
+    question: str
+    options: list[ClarificationOption]
+
+
+class InteractiveSearchResponse(SearchResponse):
+    uncertainty: UncertaintyResponse
+    clarification: ClarificationPrompt | None = None
+    feedback_applied: bool
+    query_drift: float
 
 
 class CollectionCreateRequest(BaseModel):

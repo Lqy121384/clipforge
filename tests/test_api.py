@@ -163,3 +163,55 @@ def test_async_index_job(client: TestClient, auth: dict[str, str]) -> None:
         time.sleep(0.01)
     assert body["state"] == "succeeded"
     assert body["result"]["affected"] == 5
+
+
+def test_interactive_search_clarifies_and_applies_feedback(
+    client: TestClient, auth: dict[str, str]
+) -> None:
+    items = [
+        {"id": "formal", "text": "formal leather office shoe"},
+        {"id": "casual", "text": "comfortable casual sneaker"},
+        {"id": "outdoor", "text": "waterproof mountain boot"},
+    ]
+    indexed = client.post(
+        "/api/v1/collections/shoes/items/text",
+        json={"items": items},
+        headers=auth,
+    )
+    assert indexed.status_code == 200
+    initial = client.post(
+        "/api/v1/collections/shoes/search/interactive",
+        json={
+            "query_type": "text",
+            "query": "a shoe for an event",
+            "limit": 3,
+            "margin_threshold": 0.99,
+            "entropy_threshold": 0.01,
+        },
+        headers=auth,
+    )
+    assert initial.status_code == 200
+    initial_body = initial.json()
+    assert initial_body["uncertainty"]["needs_clarification"] is True
+    assert len(initial_body["clarification"]["options"]) == 2
+
+    positive = initial_body["clarification"]["options"][0]["id"]
+    negative = initial_body["clarification"]["options"][1]["id"]
+    refined = client.post(
+        "/api/v1/collections/shoes/search/interactive",
+        json={
+            "query_type": "text",
+            "query": "a shoe for an event",
+            "limit": 3,
+            "feedback": {
+                "positive_ids": [positive],
+                "negative_ids": [negative],
+            },
+        },
+        headers=auth,
+    )
+    assert refined.status_code == 200
+    refined_body = refined.json()
+    assert refined_body["feedback_applied"] is True
+    assert refined_body["query_drift"] > 0
+    assert refined_body["hits"][0]["id"] == positive

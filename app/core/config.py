@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "CLIPForge"
-    version: str = "0.2.0"
+    version: str = "0.3.0"
     environment: str = "development"
     host: str = "0.0.0.0"
     port: int = 8000
